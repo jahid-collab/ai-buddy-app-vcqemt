@@ -392,12 +392,14 @@ const styles = StyleSheet.create({
   messagesContent: {
     padding: 16,
     paddingBottom: 8,
+    flexGrow: 1,
   },
   messageBubble: {
     maxWidth: '80%',
     padding: 12,
     borderRadius: 16,
     marginBottom: 12,
+    flexShrink: 1,
   },
   userBubble: {
     alignSelf: 'flex-end',
