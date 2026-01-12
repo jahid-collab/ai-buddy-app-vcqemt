@@ -71,63 +71,22 @@ export default function ChatScreen() {
     loadConversationHistory();
   }, [conversationId]);
 
-  const sendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: inputText.trim(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputText('');
-    setIsLoading(true);
-
-    const assistantMessageId = (Date.now() + 1).toString();
-    const assistantMessage: Message = {
-      id: assistantMessageId,
-      role: 'assistant',
-      content: '',
-      isStreaming: true,
-    };
-
-    setMessages((prev) => [...prev, assistantMessage]);
-
-    try {
-      // Backend Integration: POST /api/chat/stream with { message, conversationId }
-      console.log('[Chat] Sending message to backend:', BACKEND_URL);
-      const response = await fetch(`${BACKEND_URL}/api/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: userMessage.content,
-          conversationId: conversationId,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No reader available');
-      }
-
+  const sendMessageWithXHR = (userMessage: Message, assistantMessageId: string) => {
+    return new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BACKEND_URL}/api/chat/stream`, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      
       let accumulatedContent = '';
+      let lastProcessedIndex = 0;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      xhr.onprogress = () => {
+        const responseText = xhr.responseText;
+        const newText = responseText.substring(lastProcessedIndex);
+        lastProcessedIndex = responseText.length;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
+        const lines = newText.split('\n');
+        
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
@@ -159,10 +118,133 @@ export default function ChatScreen() {
                 );
               }
             } catch (e) {
-              console.log('Error parsing SSE data:', e);
+              console.log('[Chat] Error parsing SSE data:', e);
             }
           }
         }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          resolve();
+        } else {
+          reject(new Error(`Request failed with status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network request failed'));
+      };
+
+      xhr.send(JSON.stringify({
+        message: userMessage.content,
+        conversationId: conversationId,
+      }));
+    });
+  };
+
+  const sendMessageWithFetch = async (userMessage: Message, assistantMessageId: string) => {
+    console.log('[Chat] Sending message to backend:', BACKEND_URL);
+    const response = await fetch(`${BACKEND_URL}/api/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: userMessage.content,
+        conversationId: conversationId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get response');
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (!reader) {
+      throw new Error('No reader available');
+    }
+
+    let accumulatedContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.chunk) {
+              accumulatedContent += parsed.chunk;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: accumulatedContent }
+                    : msg
+                )
+              );
+            }
+
+            if (parsed.conversationId && !conversationId) {
+              setConversationId(parsed.conversationId);
+            }
+
+            if (parsed.done) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, isStreaming: false }
+                    : msg
+                )
+              );
+            }
+          } catch (e) {
+            console.log('[Chat] Error parsing SSE data:', e);
+          }
+        }
+      }
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!inputText.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputText.trim(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInputText('');
+    setIsLoading(true);
+
+    const assistantMessageId = (Date.now() + 1).toString();
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, assistantMessage]);
+
+    try {
+      // Use XMLHttpRequest for iOS, fetch for other platforms
+      if (Platform.OS === 'ios') {
+        console.log('[Chat] Using XMLHttpRequest for iOS streaming');
+        await sendMessageWithXHR(userMessage, assistantMessageId);
+      } else {
+        console.log('[Chat] Using fetch for streaming');
+        await sendMessageWithFetch(userMessage, assistantMessageId);
       }
     } catch (error) {
       console.error('[Chat] Error sending message:', error);
