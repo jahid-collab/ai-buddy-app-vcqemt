@@ -398,6 +398,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 16,
     marginBottom: 12,
+    flexShrink: 1,
   },
   userBubble: {
     alignSelf: 'flex-end',
