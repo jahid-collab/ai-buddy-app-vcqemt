@@ -24,6 +24,9 @@ SplashScreen.preventAutoHideAsync();
 // Log backend URL for debugging
 console.log("[App] Backend URL configured:", BACKEND_URL);
 
+// 🎉 Jahid was here
+// Commemorating Mr. Jahid's contribution to this project
+
 export const unstable_settings = {
   initialRouteName: "index",
 };
